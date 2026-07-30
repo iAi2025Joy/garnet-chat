@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Panel - GARNET-26</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    background: #111;
+    color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+
+  .top-bar {
+    background: #000;
+    border-bottom: 1px solid #d9a441;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .top-bar h1 {
+    font-size: 18px;
+    margin: 0;
+  }
+
+  .top-bar a {
+    color: #d9a441;
+    text-decoration: none;
+    font-size: 13px;
+  }
+
+  .container {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+
+  /* Sign-in gate, shown until an admin account is verified */
+  .auth-gate {
+    max-width: 340px;
+    margin: 80px auto;
+    text-align: center;
+  }
+
+  .auth-gate input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px;
+    font-size: 15px;
+    border: 1px solid #444;
+    border-radius: 8px;
+    background: #000;
+    color: white;
+    margin-bottom: 10px;
+  }
+
+  .auth-gate button {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+    font-weight: bold;
+    background: #d9a441;
+    color: #111;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  .auth-gate button:hover { opacity: 0.9; }
+
+  .error-text {
+    color: #e05252;
+    font-size: 13px;
+    margin-top: 10px;
+    min-height: 16px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 10px 8px;
+    border-bottom: 1px solid #2a2a2a;
+  }
+
+  th {
+    color: #d9a441;
+    font-size: 12px;
+    text-transform: uppercase;
+  }
+
+  .status-badge {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .status-active { background: #1e3a1e; color: #6fbf6f; }
+  .status-disabled { background: #3a1e1e; color: #e05252; }
+  .status-unverified { background: #3a301e; color: #d9a441; }
+
+  .action-btn {
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background: #1c1c1c;
+    color: #ddd;
+    font-size: 11.5px;
+    cursor: pointer;
+    margin-right: 4px;
+  }
+
+  .action-btn:hover { background: #2a2a2a; }
+  .action-btn.danger:hover { background: #3a1e1e; color: #e05252; border-color: #e05252; }
+
+  #refreshBtn {
+    padding: 8px 16px;
+    background: #d9a441;
+    color: #111;
+    border: none;
+    border-radius: 8px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-bottom: 16px;
+  }
+
+  .loading-text, .empty-text {
+    color: #888;
+    text-align: center;
+    padding: 30px;
+  }
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>🛡️ GARNET-26 Admin Panel</h1>
+  <a href="https://garnet.institute-of-ai.org/">← Back to Chat</a>
+</div>
+
+<div id="authGateSection" class="auth-gate">
+  <h2>Admin Sign In</h2>
+  <input type="email" id="adminEmail" placeholder="Email">
+  <input type="password" id="adminPassword" placeholder="Password">
+  <button onclick="handleAdminSignIn()">Sign In</button>
+  <div id="authError" class="error-text"></div>
+</div>
+
+<div id="panelSection" class="container" style="display:none;">
+  <button id="refreshBtn" onclick="loadUsers()">🔄 Refresh User List</button>
+  <div id="usersContainer">
+    <div class="loading-text">Loading users...</div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+
+<script>
+  // Same Firebase project as the main chat app -- admin is just a
+  // regular account with an extra custom claim, not a separate system.
+  const firebaseConfig = {
+    apiKey: "AIzaSyDg684F5zl8U94jcajBDCn7XZt-UIB2BO8",
+    authDomain: "garnet-chat-7d04a.firebaseapp.com",
+    projectId: "garnet-chat-7d04a",
+    storageBucket: "garnet-chat-7d04a.firebasestorage.app",
+    messagingSenderId: "1041498206561",
+    appId: "1:1041498206561:web:cce170fdabf3549bfc9520",
+  };
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+
+  const API_BASE = "https://ai-chat-backend-3-g573.onrender.com";
+
+  function handleAdminSignIn() {
+    const email = document.getElementById("adminEmail").value.trim();
+    const password = document.getElementById("adminPassword").value;
+    const errorEl = document.getElementById("authError");
+    errorEl.textContent = "";
+
+    if (!email || !password) {
+      errorEl.textContent = "Please enter your email and password.";
+      return;
+    }
+
+    auth.signInWithEmailAndPassword(email, password).catch((error) => {
+      errorEl.textContent = "Incorrect email or password.";
+    });
+  }
+
+  // The REAL check happens on every backend request too (see
+  // adminUsers.js) -- this frontend check just decides whether to show
+  // the panel UI at all, it is not the actual security boundary.
+  auth.onAuthStateChanged(async (user) => {
+    const authSection = document.getElementById("authGateSection");
+    const panelSection = document.getElementById("panelSection");
+    const errorEl = document.getElementById("authError");
+
+    if (!user) {
+      authSection.style.display = "block";
+      panelSection.style.display = "none";
+      return;
+    }
+
+    const tokenResult = await user.getIdTokenResult();
+    if (tokenResult.claims.admin === true) {
+      authSection.style.display = "none";
+      panelSection.style.display = "block";
+      loadUsers();
+    } else {
+      errorEl.textContent = "This account does not have admin access.";
+      auth.signOut();
+    }
+  });
+
+  async function loadUsers() {
+    const container = document.getElementById("usersContainer");
+    container.innerHTML = '<div class="loading-text">Loading users...</div>';
+
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch(`${API_BASE}/admin/users`, {
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        container.innerHTML = `<div class="empty-text">Error: ${data.error || "Could not load users."}</div>`;
+        return;
+      }
+
+      if (!data.users || data.users.length === 0) {
+        container.innerHTML = '<div class="empty-text">No registered users yet.</div>';
+        return;
+      }
+
+      renderUsersTable(data.users);
+    } catch (err) {
+      container.innerHTML = '<div class="empty-text">Could not reach the server. Please try again.</div>';
+    }
+  }
+
+  function renderUsersTable(users) {
+    const container = document.getElementById("usersContainer");
+    const rows = users.map((u) => {
+      let statusBadge = u.disabled
+        ? '<span class="status-badge status-disabled">Disabled</span>'
+        : u.emailVerified
+        ? '<span class="status-badge status-active">Active</span>'
+        : '<span class="status-badge status-unverified">Unverified</span>';
+
+      const createdDate = u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "-";
+      const lastSignInDate = u.lastSignInAt ? new Date(u.lastSignInAt).toLocaleDateString() : "Never";
+
+      return `
+        <tr>
+          <td>${escapeHtml(u.displayName || "(no name)")}</td>
+          <td>${escapeHtml(u.email || "")}</td>
+          <td>${statusBadge}</td>
+          <td>${createdDate}</td>
+          <td>${lastSignInDate}</td>
+          <td>
+            ${u.disabled
+              ? `<button class="action-btn" onclick="performAction('${u.uid}','enable')">Reactivate</button>`
+              : `<button class="action-btn" onclick="performAction('${u.uid}','disable')">Disable</button>`}
+            <button class="action-btn danger" onclick="performDelete('${u.uid}','${escapeHtml(u.email || "")}')">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Status</th>
+            <th>Joined</th>
+            <th>Last Sign-In</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  async function performAction(uid, action) {
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch(`${API_BASE}/admin/users/${uid}/${action}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        alert(data.error || "Action failed.");
+        return;
+      }
+      loadUsers();
+    } catch (err) {
+      alert("Could not reach the server. Please try again.");
+    }
+  }
+
+  async function performDelete(uid, email) {
+    if (!confirm(`Permanently delete the account for ${email}? This cannot be undone.`)) return;
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch(`${API_BASE}/admin/users/${uid}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        alert(data.error || "Delete failed.");
+        return;
+      }
+      loadUsers();
+    } catch (err) {
+      alert("Could not reach the server. Please try again.");
+    }
+  }
+</script>
+
+</body>
+</html>
